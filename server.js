@@ -218,8 +218,86 @@ app.get('/api/admin/session', (req, res) => {
   res.json({ loggedIn: !!req.session?.isAdmin });
 });
 
-app.get('/api/admin/overview',adminOnly,(_req,res)=>{const reqs=readJson(DATA_FILE),providers=readJson(PROVIDERS_FILE),reports=readJson(REPORTS_FILE),donations=readJson(DONATIONS_FILE),feedback=readJson(FEEDBACK_FILE);res.json({totalRequests:reqs.length,openRequests:reqs.filter(x=>!['resolved','closed','cancelled'].includes(x.status)).length,completed:reqs.filter(x=>x.status==='resolved').length,pendingProviders:providers.filter(x=>x.status==='pending_review').length,newReports:reports.filter(x=>x.status==='new').length,requests:reqs,providers,reports,donations,feedback})});
-app.get('/api/admin/requests',adminOnly,(_req,res)=>res.json(readJson(DATA_FILE)));
+
+app.get('/api/admin/overview', adminOnly, async (_req, res) => {
+  try {
+    const { data: rows, error } = await supabase
+      .from('help_requests')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    const reqs = (rows || []).map(row => ({
+      ...row.request_data,
+      id: row.id,
+      reference: row.reference,
+      category: row.category,
+      area: row.area,
+      description: row.description,
+      contact: row.contact,
+      status: row.status,
+      createdAt: row.created_at
+    }));
+
+    const providers = readJson(PROVIDERS_FILE);
+    const reports = readJson(REPORTS_FILE);
+    const donations = readJson(DONATIONS_FILE);
+    const feedback = readJson(FEEDBACK_FILE);
+
+    return res.json({
+      totalRequests: reqs.length,
+      openRequests: reqs.filter(
+        x => !['resolved', 'closed', 'cancelled'].includes(x.status)
+      ).length,
+      completed: reqs.filter(x => x.status === 'resolved').length,
+      pendingProviders: providers.filter(x => x.status === 'pending_review').length,
+      newReports: reports.filter(x => x.status === 'new').length,
+      requests: reqs,
+      providers,
+      reports,
+      donations,
+      feedback
+    });
+  } catch (error) {
+    console.error('Supabase dashboard load failed:', error.message);
+    return res.status(500).json({
+      error: 'Could not load dashboard data from Supabase.'
+    });
+  }
+});
+
+
+app.get('/api/admin/requests', adminOnly, async (_req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('help_requests')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    const requests = (data || []).map(row => ({
+      ...row.request_data,
+      id: row.id,
+      reference: row.reference,
+      category: row.category,
+      area: row.area,
+      description: row.description,
+      contact: row.contact,
+      status: row.status,
+      createdAt: row.created_at
+    }));
+
+    return res.json(requests);
+  } catch (error) {
+    console.error('Supabase requests load failed:', error.message);
+    return res.status(500).json({
+      error: 'Could not load requests from Supabase.'
+    });
+  }
+});
+
 app.patch('/api/admin/donations/:id',adminOnly,(req,res)=>{const rows=readJson(DONATIONS_FILE),item=rows.find(x=>x.id===clean(req.params.id,30));if(!item)return res.status(404).json({error:'Donation offer not found.'});const status=clean(req.body?.status,30);if(!['pending_review','contacted','accepted','completed','declined'].includes(status))return res.status(400).json({error:'Invalid donation status.'});item.status=status;item.updatedAt=new Date().toISOString();writeJson(DONATIONS_FILE,rows);res.json({message:'Donation offer updated.'})});
 app.patch('/api/admin/feedback/:id',adminOnly,(req,res)=>{const rows=readJson(FEEDBACK_FILE),item=rows.find(x=>x.id===clean(req.params.id,30));if(!item)return res.status(404).json({error:'Feedback not found.'});item.status=['new','reviewing','resolved','dismissed'].includes(req.body?.status)?req.body.status:'reviewing';item.updatedAt=new Date().toISOString();writeJson(FEEDBACK_FILE,rows);res.json({message:'Feedback updated.'})});
 app.get('/api/admin/uploads/:filename',adminOnly,(req,res)=>{const f=path.basename(req.params.filename),full=path.join(UPLOAD_DIR,f);if(!fs.existsSync(full))return res.status(404).end();res.setHeader('Cache-Control','no-store');res.sendFile(full)});
