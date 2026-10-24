@@ -4,3 +4,5 @@ providers.json
 reports.json
 private_uploads/
 .env
+supabase/.temp/
+supabase/.branches/
