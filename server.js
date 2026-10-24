@@ -13,6 +13,7 @@ const session = require('express-session');
 const multer = require('multer');
 
 const app = express();
+app.set('trust proxy', 1);
 app.disable('x-powered-by');
 const PORT = Number(process.env.PORT || 3000);
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'admin';
@@ -160,8 +161,63 @@ app.post('/api/providers',(req,res)=>{const b=req.body||{};const name=clean(b.na
 app.post('/api/donations',(req,res)=>{const b=req.body||{};const type=clean(b.type,100),details=clean(b.details,600),name=clean(b.name,100),contact=clean(b.contact,120),area=clean(b.area,160);const allowed=['Food and water','Clothing and essentials','Medical supplies (organization review required)','Volunteer time','Financial donation inquiry','Other supplies'];if(!allowed.includes(type)||!details||!contact||!area||b.consent!==true)return res.status(400).json({error:'Complete the required fields and consent.'});const rows=readJson(DONATIONS_FILE);const item={id:'D-'+crypto.randomBytes(3).toString('hex').toUpperCase(),type,details,name,contact,area,status:'pending_review',createdAt:new Date().toISOString()};rows.unshift(item);writeJson(DONATIONS_FILE,rows);res.status(201).json({id:item.id,message:'Donation offer saved for coordinator review.'})});
 app.post('/api/feedback',(req,res)=>{const b=req.body||{};const reference=clean(b.reference,30).toUpperCase(),contact=clean(b.contact,120),rating=Number(b.rating),comment=clean(b.comment,500);if(!reference||!contact||!Number.isInteger(rating)||rating<1||rating>5)return res.status(400).json({error:'Enter a request reference, matching contact, and a rating from 1 to 5.'});const request=readJson(DATA_FILE).find(x=>x.reference===reference&&x.contact===contact);if(!request)return res.status(404).json({error:'Request reference and contact did not match.'});if(!['resolved','closed'].includes(request.status))return res.status(400).json({error:'Feedback is available after a request is completed or closed.'});const rows=readJson(FEEDBACK_FILE);if(rows.some(x=>x.reference===reference))return res.status(409).json({error:'Feedback has already been submitted for this request.'});const item={id:'F-'+crypto.randomBytes(3).toString('hex').toUpperCase(),reference,rating,comment,status:'new',createdAt:new Date().toISOString()};rows.unshift(item);writeJson(FEEDBACK_FILE,rows);res.status(201).json({id:item.id,message:'Feedback submitted for coordinator review.'})});
 app.post('/api/reports',(req,res)=>{const b=req.body||{};const description=clean(b.description,1000),reference=clean(b.reference,30),contact=clean(b.contact,120),type=clean(b.type,50);if(!description||!type||b.consent!==true)return res.status(400).json({error:'Choose a report type, describe the concern and confirm consent.'});const rows=readJson(REPORTS_FILE);const item={id:'R-'+crypto.randomBytes(3).toString('hex').toUpperCase(),type,reference,contact,description,status:'new',createdAt:new Date().toISOString()};rows.unshift(item);writeJson(REPORTS_FILE,rows);res.status(201).json({message:'Report recorded for coordinator review.',id:item.id})});
-app.post('/api/admin/login',(req,res)=>{const u=clean(req.body?.username,128),p=String(req.body?.password||'');const eq=(a,b)=>{const aa=Buffer.from(a),bb=Buffer.from(b);return aa.length===bb.length&&crypto.timingSafeEqual(aa,bb)};if(!eq(u,ADMIN_USERNAME)||!eq(p,ADMIN_PASSWORD))return res.status(401).json({error:'Incorrect username or password.'});req.session.regenerate(err=>{if(err)return res.status(500).json({error:'Could not create secure session.'});req.session.isAdmin=true;req.session.adminUsername=u;res.json({message:'Logged in.'})})});
-app.post('/api/admin/logout',(req,res)=>req.session.destroy(()=>res.json({message:'Logged out.'})));app.get('/api/admin/session',(req,res)=>res.json({loggedIn:!!req.session?.isAdmin}));
+
+app.post('/api/admin/login', (req, res) => {
+  const u = clean(req.body?.username, 128);
+  const p = String(req.body?.password || '');
+
+  const eq = (a, b) => {
+    const aa = Buffer.from(a);
+    const bb = Buffer.from(b);
+    return aa.length === bb.length && crypto.timingSafeEqual(aa, bb);
+  };
+
+  if (!eq(u, ADMIN_USERNAME) || !eq(p, ADMIN_PASSWORD)) {
+    return res.status(401).json({
+      error: 'Incorrect username or password.'
+    });
+  }
+
+  req.session.regenerate((err) => {
+    if (err) {
+      console.error('Session regeneration failed:', err);
+      return res.status(500).json({
+        error: 'Could not create secure session.'
+      });
+    }
+
+    req.session.isAdmin = true;
+    req.session.adminUsername = u;
+
+    req.session.save((saveErr) => {
+      if (saveErr) {
+        console.error('Session save failed:', saveErr);
+        return res.status(500).json({
+          error: 'Could not save login session.'
+        });
+      }
+
+      return res.json({ message: 'Logged in.' });
+    });
+  });
+});
+
+app.post('/api/admin/logout', (req, res) => {
+  req.session.destroy((err) => {
+    res.clearCookie('ddh.sid', { path: '/' });
+
+    if (err) {
+      return res.status(500).json({ error: 'Could not log out.' });
+    }
+
+    return res.json({ message: 'Logged out.' });
+  });
+});
+
+app.get('/api/admin/session', (req, res) => {
+  res.json({ loggedIn: !!req.session?.isAdmin });
+});
+
 app.get('/api/admin/overview',adminOnly,(_req,res)=>{const reqs=readJson(DATA_FILE),providers=readJson(PROVIDERS_FILE),reports=readJson(REPORTS_FILE),donations=readJson(DONATIONS_FILE),feedback=readJson(FEEDBACK_FILE);res.json({totalRequests:reqs.length,openRequests:reqs.filter(x=>!['resolved','closed','cancelled'].includes(x.status)).length,completed:reqs.filter(x=>x.status==='resolved').length,pendingProviders:providers.filter(x=>x.status==='pending_review').length,newReports:reports.filter(x=>x.status==='new').length,requests:reqs,providers,reports,donations,feedback})});
 app.get('/api/admin/requests',adminOnly,(_req,res)=>res.json(readJson(DATA_FILE)));
 app.patch('/api/admin/donations/:id',adminOnly,(req,res)=>{const rows=readJson(DONATIONS_FILE),item=rows.find(x=>x.id===clean(req.params.id,30));if(!item)return res.status(404).json({error:'Donation offer not found.'});const status=clean(req.body?.status,30);if(!['pending_review','contacted','accepted','completed','declined'].includes(status))return res.status(400).json({error:'Invalid donation status.'});item.status=status;item.updatedAt=new Date().toISOString();writeJson(DONATIONS_FILE,rows);res.json({message:'Donation offer updated.'})});
