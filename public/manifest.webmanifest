@@ -1,0 +1,11 @@
+{
+  "name": "DEV DOOT HANUMAN — Community Help",
+  "short_name": "Dev Doot",
+  "description": "Community support and help request tracking for Nashik",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#fff7ea",
+  "theme_color": "#f47700",
+  "icons": [{"src":"/icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]
+}

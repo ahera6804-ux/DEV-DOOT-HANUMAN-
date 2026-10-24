@@ -1,0 +1,6 @@
+node_modules/
+requests.json
+providers.json
+reports.json
+private_uploads/
+.env
