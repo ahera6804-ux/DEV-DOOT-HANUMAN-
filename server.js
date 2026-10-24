@@ -1,4 +1,11 @@
+
+require('dotenv').config();
+const { createClient } = require('@supabase/supabase-js');
 const express = require('express');
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SECRET_KEY
+);
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
@@ -40,16 +47,114 @@ app.use('/api', (req,res,next)=>{ const key=req.ip+':'+req.path; const now=Date.
 app.get('/api/health',(_req,res)=>res.json({status:'ok',app:'Dev Doot Hanuman',version:'2.1-community-pilot'}));
 app.get('/api/public-info',(_req,res)=>res.json({coordinatorPhone:COORDINATOR_PHONE,categories:[...categories],statuses:statusNames,features:{emergencyDispatch:false,onlinePayments:false,smsNotifications:false,liveMap:false}}));
 
-app.post('/api/requests', upload.fields([{name:'problemPhoto',maxCount:1},{name:'personPhoto',maxCount:1}]), (req,res)=>{
- const problemPhoto=req.files?.problemPhoto?.[0], personPhoto=req.files?.personPhoto?.[0];
- const b=req.body||{}; const category=clean(b.category,80), area=clean(b.area,160), description=clean(b.description,1200), contact=clean(b.contact,120);
- if(!category||!categories.has(category)||!area||!description||description.length<8||!contact||b.consent!=='true') { removeUpload(problemPhoto);removeUpload(personPhoto); return res.status(400).json({error:'Complete the required fields, choose a valid category, and confirm consent.'}); }
- if((problemPhoto&&!allowedMime.has(problemPhoto.mimetype))||(personPhoto&&!allowedMime.has(personPhoto.mimetype))) { removeUpload(problemPhoto);removeUpload(personPhoto);return res.status(400).json({error:'Photos must be JPG, PNG, or WebP.'}); }
- const requests=readJson(DATA_FILE); const item={id:crypto.randomBytes(4).toString('hex').toUpperCase(),reference:'DDH-'+crypto.randomBytes(3).toString('hex').toUpperCase(),category,area,description,contact,language:['en','mr','hi'].includes(b.language)?b.language:'en',problemPhoto:problemPhoto?.filename||'',personPhoto:personPhoto?.filename||'',latitude:clean(b.latitude,30),longitude:clean(b.longitude,30),trustedContact:clean(b.trustedContact,120),status:'received',assignedHelper:'',priceEstimate:clean(b.priceEstimate,50),createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),consentAt:new Date().toISOString(),history:[{status:'received',at:new Date().toISOString(),note:'Request submitted'}]};
- try{requests.unshift(item);writeJson(DATA_FILE,requests)}catch(e){removeUpload(problemPhoto);removeUpload(personPhoto);console.error(e);return res.status(500).json({error:'Could not save request. Please contact the coordinator.'})}
- const summary=`DEV DOOT HANUMAN request ${item.reference}\nCategory: ${category}\nArea: ${area}\nDescription: ${description}\nContact: ${contact}\nStatus: Received — awaiting human review. This message does not dispatch emergency services.`;
- res.status(201).json({reference:item.reference,status:item.status,statusLabel:statusNames[item.status],message:'Request recorded on this computer. The coordinator must review it manually.',coordinatorPhone:COORDINATOR_PHONE,whatsappUrl:`https://wa.me/91${COORDINATOR_PHONE}?text=${encodeURIComponent(summary)}`});
+
+app.post('/api/requests', upload.fields([
+  { name: 'problemPhoto', maxCount: 1 },
+  { name: 'personPhoto', maxCount: 1 }
+]), async (req, res) => {
+  const problemPhoto = req.files?.problemPhoto?.[0];
+  const personPhoto = req.files?.personPhoto?.[0];
+  const b = req.body || {};
+
+  const category = clean(b.category, 80);
+  const area = clean(b.area, 160);
+  const description = clean(b.description, 1200);
+  const contact = clean(b.contact, 120);
+
+  if (
+    !category ||
+    !categories.has(category) ||
+    !area ||
+    !description ||
+    description.length < 8 ||
+    !contact ||
+    b.consent !== 'true'
+  ) {
+    removeUpload(problemPhoto);
+    removeUpload(personPhoto);
+    return res.status(400).json({
+      error: 'Complete the required fields, choose a valid category, and confirm consent.'
+    });
+  }
+
+  if (
+    (problemPhoto && !allowedMime.has(problemPhoto.mimetype)) ||
+    (personPhoto && !allowedMime.has(personPhoto.mimetype))
+  ) {
+    removeUpload(problemPhoto);
+    removeUpload(personPhoto);
+    return res.status(400).json({
+      error: 'Photos must be JPG, PNG, or WebP.'
+    });
+  }
+
+  const now = new Date().toISOString();
+
+  const item = {
+    id: crypto.randomBytes(4).toString('hex').toUpperCase(),
+    reference: 'DDH-' + crypto.randomBytes(3).toString('hex').toUpperCase(),
+    category,
+    area,
+    description,
+    contact,
+    language: ['en', 'mr', 'hi'].includes(b.language) ? b.language : 'en',
+    problemPhoto: problemPhoto?.filename || '',
+    personPhoto: personPhoto?.filename || '',
+    latitude: clean(b.latitude, 30),
+    longitude: clean(b.longitude, 30),
+    trustedContact: clean(b.trustedContact, 120),
+    status: 'received',
+    assignedHelper: '',
+    priceEstimate: clean(b.priceEstimate, 50),
+    createdAt: now,
+    updatedAt: now,
+    consentAt: now,
+    history: [{ status: 'received', at: now, note: 'Request submitted' }]
+  };
+
+  try {
+    const { error } = await supabase
+      .from('help_requests')
+      .insert({
+        id: item.id,
+        reference: item.reference,
+        category: item.category,
+        area: item.area,
+        description: item.description,
+        contact: item.contact,
+        status: item.status,
+        created_at: now,
+        request_data: item
+      });
+
+    if (error) throw error;
+  } catch (error) {
+    removeUpload(problemPhoto);
+    removeUpload(personPhoto);
+    console.error('Supabase request save failed:', error.message);
+    return res.status(500).json({
+      error: 'Could not save request. Please try again or contact the coordinator.'
+    });
+  }
+
+  const summary =
+    `DEV DOOT HANUMAN request ${item.reference}\n` +
+    `Category: ${category}\n` +
+    `Area: ${area}\n` +
+    `Description: ${description}\n` +
+    `Contact: ${contact}\n` +
+    'Status: Received — awaiting human review. This message does not dispatch emergency services.';
+
+  return res.status(201).json({
+    reference: item.reference,
+    status: item.status,
+    statusLabel: statusNames[item.status],
+    message: 'Request saved for coordinator review.',
+    coordinatorPhone: COORDINATOR_PHONE,
+    whatsappUrl: `https://wa.me/91${COORDINATOR_PHONE}?text=${encodeURIComponent(summary)}`
+  });
 });
+
 app.post('/api/requests/track',(req,res)=>{const reference=clean(req.body?.reference,30).toUpperCase(),contact=clean(req.body?.contact,120);if(!reference||!contact)return res.status(400).json({error:'Enter reference and the contact detail used in the request.'});const item=readJson(DATA_FILE).find(x=>x.reference===reference&&x.contact===contact);if(!item)return res.status(404).json({error:'No matching request found. Check the reference and contact detail.'});res.json({reference:item.reference,category:item.category,area:item.area,status:item.status,statusLabel:statusNames[item.status]||item.status,assignedHelper:item.assignedHelper,createdAt:item.createdAt,updatedAt:item.updatedAt,history:item.history||[]})});
 app.post('/api/providers',(req,res)=>{const b=req.body||{};const name=clean(b.name,100),phone=clean(b.phone,120),services=Array.isArray(b.services)?b.services.map(x=>clean(x,80)).filter(Boolean).slice(0,10):[],area=clean(b.area,160),kind=clean(b.kind,30);if(!name||!phone||!area||!services.length||!['volunteer','paid_provider','organization'].includes(kind)||b.consent!==true)return res.status(400).json({error:'Complete name, contact, area, services and consent.'});const rows=readJson(PROVIDERS_FILE);const provider={id:'P-'+crypto.randomBytes(3).toString('hex').toUpperCase(),name,phone,services,area,kind,availability:clean(b.availability,120),notes:clean(b.notes,500),status:'pending_review',rating:null,completedJobs:0,createdAt:new Date().toISOString()};rows.unshift(provider);writeJson(PROVIDERS_FILE,rows);res.status(201).json({message:'Registration received for coordinator review. You are not verified or assigned to requests yet.',id:provider.id,status:provider.status})});
 app.post('/api/donations',(req,res)=>{const b=req.body||{};const type=clean(b.type,100),details=clean(b.details,600),name=clean(b.name,100),contact=clean(b.contact,120),area=clean(b.area,160);const allowed=['Food and water','Clothing and essentials','Medical supplies (organization review required)','Volunteer time','Financial donation inquiry','Other supplies'];if(!allowed.includes(type)||!details||!contact||!area||b.consent!==true)return res.status(400).json({error:'Complete the required fields and consent.'});const rows=readJson(DONATIONS_FILE);const item={id:'D-'+crypto.randomBytes(3).toString('hex').toUpperCase(),type,details,name,contact,area,status:'pending_review',createdAt:new Date().toISOString()};rows.unshift(item);writeJson(DONATIONS_FILE,rows);res.status(201).json({id:item.id,message:'Donation offer saved for coordinator review.'})});
