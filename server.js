@@ -67,4 +67,10 @@ app.patch('/api/admin/providers/:id',adminOnly,(req,res)=>{const allowed=['pendi
 app.patch('/api/admin/reports/:id',adminOnly,(req,res)=>{const rows=readJson(REPORTS_FILE),r=rows.find(x=>x.id===clean(req.params.id,30));if(!r)return res.status(404).json({error:'Report not found.'});r.status=['new','reviewing','resolved','dismissed'].includes(req.body?.status)?req.body.status:'reviewing';r.updatedAt=new Date().toISOString();writeJson(REPORTS_FILE,rows);res.json({message:'Report updated.'})});
 app.get('/admin.html',(_req,res)=>res.sendFile(path.join(__dirname,'public','admin.html')));
 app.use((err,_req,res,_next)=>{console.error(err);if(err instanceof multer.MulterError)return res.status(400).json({error:err.code==='LIMIT_FILE_SIZE'?'Each photo must be 5 MB or smaller.':'Upload failed. Try one photo per field.'});res.status(400).json({error:'Invalid request. Check the fields and photo types.'})});
-app.listen(PORT,'0.0.0.0',()=>{console.log(`DEV DOOT HANUMAN running at http://localhost:${PORT}`);console.log(`Coordinator contact: ${COORDINATOR_PHONE}`);console.log('Coordinator dashboard: http://localhost:'+PORT+'/admin.html');console.log('LOCAL DEMO LOGIN: '+ADMIN_USERNAME+' / '+ADMIN_PASSWORD);console.warn('Prototype storage is local JSON/files; do not use for public sensitive data or rely on it as an emergency service.')});
+if (require.main === module) {
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`DEV DOOT HANUMAN running at http://localhost:${PORT}`);
+  });
+}
+
+module.exports = app;
